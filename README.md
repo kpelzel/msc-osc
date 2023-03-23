@@ -1,6 +1,6 @@
 # msc-osc
 
-receives MSC (MIDI Show Control) messages from an etc express (sysex messages) and sends it out as an osc message. I made ths just to control scenes in QLC+ with the etc express. Tested on Windows and MacOS.
+Receives MSC (MIDI Show Control) messages from an etc express (sysex messages) and sends it out as an osc message. I made ths just to control scenes in QLC+ with the etc express. Tested on Windows and MacOS.
 
 
 ## Dependencies
