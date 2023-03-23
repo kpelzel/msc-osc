@@ -1,0 +1,3 @@
+midiIn: Keyboard
+oscOutIP: 127.0.0.1
+oscOutPort: 8765

@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -10,17 +13,24 @@ import (
 
 	"gitlab.com/gomidi/midi/v2"
 	_ "gitlab.com/gomidi/midi/v2/drivers/rtmididrv" // autoregisters driver
-	// _ "gitlab.com/gomidi/midi/v2/drivers/midicatdrv" // autoregisters driver
+
+	yaml "gopkg.in/yaml.v3"
 )
 
 const (
-	midiIn     = "Keyboard"
-	oscOutIP   = "127.0.0.1"
-	oscOutPort = 8765
+	DefaultMidiIn     = "Keyboard"
+	DefaultOSCOutIP   = "127.0.0.1"
+	DefaultOSCOutPort = 8765
 )
 
 type MSCOSC struct {
 	OSCClient *osc.Client
+}
+
+type conf struct {
+	MidiIn     string `yaml:"midiIn"`
+	OSCOutIP   net.IP `yaml:"oscOutIP"`
+	OSCOutPort int    `yaml:"oscOutPort"`
 }
 
 func main() {
@@ -28,15 +38,26 @@ func main() {
 
 	fmt.Println("hello world")
 
+	confBytes, err := ioutil.ReadFile("config.yaml")
+	if err != nil {
+		log.Fatalf("failed to read config file: %v", err)
+	}
+
+	conf := &conf{}
+	err = yaml.Unmarshal(confBytes, conf)
+	if err != nil {
+		log.Fatalf("failed to unmarshal config file: %v", err)
+	}
+
 	// setup osc client
 	mscOSC := &MSCOSC{
-		OSCClient: osc.NewClient(oscOutIP, oscOutPort),
+		OSCClient: osc.NewClient(conf.OSCOutIP.String(), conf.OSCOutPort),
 	}
 
 	// connect to midi input
-	in, err := midi.FindInPort(midiIn)
+	in, err := midi.FindInPort(conf.MidiIn)
 	if err != nil {
-		fmt.Printf("can't find midi %v\n", midiIn)
+		fmt.Printf("can't find midi %v\n", conf.MidiIn)
 		return
 	}
 
@@ -47,7 +68,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("listening for midi from %v(%v) and outputting to %s:%d\n", in.String(), in.Number(), oscOutIP, oscOutPort)
+	fmt.Printf("listening for midi from %v(%v) and outputting to %s:%d\n", in.String(), in.Number(), conf.OSCOutIP, conf.OSCOutPort)
 
 	// listen for ctrl+c
 	c := make(chan os.Signal, 1)
