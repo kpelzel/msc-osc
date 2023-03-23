@@ -2,65 +2,123 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"os"
+	"os/signal"
+	"strconv"
 
 	"github.com/hypebeast/go-osc/osc"
 
 	"gitlab.com/gomidi/midi/v2"
 	_ "gitlab.com/gomidi/midi/v2/drivers/rtmididrv" // autoregisters driver
+	// _ "gitlab.com/gomidi/midi/v2/drivers/midicatdrv" // autoregisters driver
 )
 
+const (
+	midiIn     = "Keyboard"
+	oscOutIP   = "127.0.0.1"
+	oscOutPort = 8765
+)
+
+type MSCOSC struct {
+	OSCClient *osc.Client
+}
+
 func main() {
-	fmt.Println("hello world")
-
-	client := osc.NewClient("127.0.0.1", 8765)
-	msg := osc.NewMessage("/msc/cue/111")
-	// msg.Append(int32(111))
-	// msg.Append(true)
-	// msg.Append("hello")
-	client.Send(msg)
-
-	msg = osc.NewMessage("/msc/cue/112")
-	// msg.Append(int32(112))
-	// msg.Append(true)
-	// msg.Append("hello")
-	client.Send(msg)
-
-	msg = osc.NewMessage("/msc/cue/113")
-	// msg.Append(int32(113))
-	// msg.Append(true)
-	// msg.Append("hello")
-	client.Send(msg)
-
 	defer midi.CloseDriver()
 
-	in, err := midi.FindInPort("Keyboard")
+	fmt.Println("hello world")
+
+	// setup osc client
+	mscOSC := &MSCOSC{
+		OSCClient: osc.NewClient(oscOutIP, oscOutPort),
+	}
+
+	// connect to midi input
+	in, err := midi.FindInPort(midiIn)
 	if err != nil {
-		fmt.Println("can't find VMPK")
+		fmt.Printf("can't find midi %v\n", midiIn)
 		return
 	}
 
-	stop, err := midi.ListenTo(in, func(msg midi.Message, timestampms int32) {
-		var bt []byte
-		var ch, key, vel uint8
-		switch {
-		case msg.GetSysEx(&bt):
-			fmt.Printf("got sysex: % X\n", bt)
-		case msg.GetNoteStart(&ch, &key, &vel):
-			fmt.Printf("starting note %s on channel %v with velocity %v\n", midi.Note(key), ch, vel)
-		case msg.GetNoteEnd(&ch, &key):
-			fmt.Printf("ending note %s on channel %v\n", midi.Note(key), ch)
-		default:
-			// ignore
-		}
-	}, midi.UseSysEx())
-
+	// listen for midi sysex commands from etc
+	stop, err := midi.ListenTo(in, mscOSC.midiListenFunc, midi.UseSysEx())
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err)
 		return
 	}
 
-	time.Sleep(time.Second * 5)
+	fmt.Printf("listening for midi from %v(%v) and outputting to %s:%d\n", in.String(), in.Number(), oscOutIP, oscOutPort)
+
+	// listen for ctrl+c
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	for range c {
+		// sig is a ^C, handle it
+		fmt.Println("quitting")
+		break
+	}
 
 	stop()
+}
+
+func (m *MSCOSC) midiListenFunc(msg midi.Message, timestampms int32) {
+	var bt []byte
+	var ch, key, vel uint8
+	switch {
+	case msg.GetSysEx(&bt):
+		fmt.Printf("got sysex: % X\n", bt)
+		command, cue, err := parseMSC(bt)
+		if err != nil {
+			fmt.Printf("failed to parse msc: %v\n", err)
+		} else {
+			m.sendOSC(command, cue)
+		}
+	case msg.GetNoteStart(&ch, &key, &vel):
+		fmt.Printf("starting note %s on channel %v with velocity %v\n", midi.Note(key), ch, vel)
+	case msg.GetNoteEnd(&ch, &key):
+		fmt.Printf("ending note %s on channel %v\n", midi.Note(key), ch)
+	default:
+		// ignore
+	}
+}
+
+func parseMSC(bt []byte) (command string, cue string, err error) {
+	if len(bt) >= 9 && bt[0] == 0x7f {
+		// get cue number
+		btLen := len(bt)
+		cue = string(bt[5 : btLen-3])
+
+		// get command
+		command = ""
+		switch bt[4] {
+		case 0x01:
+			command = "go"
+		case 0x02:
+			command = "stop"
+		case 0x03:
+			command = "resume"
+		case 0x07:
+			command = "macro"
+		default:
+			return "", "", fmt.Errorf("unrecognized msc command: %x", bt[4])
+		}
+
+		return command, cue, nil
+	}
+
+	return "", "", fmt.Errorf("not an msc packet. len: %v bt[0]: %x\n", len(bt), bt[0])
+}
+
+func (m *MSCOSC) sendOSC(command, cue string) {
+	cueInt, err := strconv.Atoi(cue)
+	if err != nil {
+		fmt.Printf("failed to convert %v to int: %v\n", cue, err)
+	} else {
+		msg := osc.NewMessage(fmt.Sprintf("/msc/%s/%s", command, cue))
+		msg.Append(int32(cueInt))
+		msg.Append(true)
+		msg.Append(command)
+		fmt.Printf("sending %v\n", msg.String())
+		m.OSCClient.Send(msg)
+	}
 }
