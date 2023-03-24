@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/big"
 	"net"
 	"os"
 	"os/signal"
@@ -35,8 +36,6 @@ type conf struct {
 
 func main() {
 	defer midi.CloseDriver()
-
-	fmt.Println("hello world")
 
 	confBytes, err := ioutil.ReadFile("config.yaml")
 	if err != nil {
@@ -131,15 +130,29 @@ func parseMSC(bt []byte) (command string, cue string, err error) {
 }
 
 func (m *MSCOSC) sendOSC(command, cue string) {
-	cueInt, err := strconv.Atoi(cue)
+	cueFloat, err := strconv.ParseFloat(cue, 64)
 	if err != nil {
 		fmt.Printf("failed to convert %v to int: %v\n", cue, err)
 	} else {
 		msg := osc.NewMessage(fmt.Sprintf("/msc/%s/%s", command, cue))
-		msg.Append(int32(cueInt))
-		msg.Append(true)
+		msg.Append(cueFloat)
 		msg.Append(command)
 		fmt.Printf("sending %v\n", msg.String())
 		m.OSCClient.Send(msg)
+	}
+}
+
+func (m *MSCOSC) sendAll() {
+	x := big.NewRat(1, 10)
+	y := big.NewRat(9999, 10)
+	z := big.NewRat(1, 10)
+	for i := x; i.Cmp(y) <= 0; i = i.Add(i, z) {
+		f, _ := i.Float64()
+		fmt.Println(f)
+		fs := fmt.Sprintf("%.1f", f)
+		if string(fs[len(fs)-1:]) == "0" {
+			m.sendOSC("go", fmt.Sprintf("%.0f", f))
+		}
+		m.sendOSC("go", fmt.Sprintf("%.1f", f))
 	}
 }
